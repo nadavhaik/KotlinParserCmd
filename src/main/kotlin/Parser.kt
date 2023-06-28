@@ -151,15 +151,16 @@ val unformattedStringPartParser: UniqueParser<RawStringPart> = pack(stringStar(c
     { str -> str.length == 1 && str[0] != '@' && str[0] != '"' && str[0] != '\n'})
     ) { str -> RawStringPart(str) }
 
-val formattedStringPartParser: UniqueParser<FormattedSExp> = fun(str: String, indexFrom: Int, scopeStack: ScopeStack): ParsingResult<FormattedSExp> {
-    val results = allowSpaces<Any>(
-        castParser(word("@")), castParser(sexpParser),
-        castParser(word("@"))
-    )(str, indexFrom, scopeStack)
+val atSignParser = word("@")
 
-    val leftAt: ParsingResult<String> = castResult(results[0])
-    val sexp: ParsingResult<SExp> = castResult(results[1])
-    val rightAt: ParsingResult<String> = castResult(results[2])
+val formattedStringPartParser: UniqueParser<FormattedSExp> = fun(str: String, indexFrom: Int, scopeStack: ScopeStack): ParsingResult<FormattedSExp> {
+    var nextIndexFrom = indexFrom
+
+    val leftAt = atSignParser(str, nextIndexFrom, scopeStack)
+    nextIndexFrom = skipSpacesParser(str, leftAt.indexTo, scopeStack).indexTo
+    val sexp = sexpParser(str, nextIndexFrom, scopeStack)
+    nextIndexFrom = skipSpacesParser(str, sexp.indexTo, scopeStack).indexTo
+    val rightAt = atSignParser(str, nextIndexFrom, scopeStack)
 
     val formattedSExp = FormattedSExp(leftAt, sexp, rightAt)
     return ParsingResult(indexFrom, rightAt.indexTo, formattedSExp)
@@ -573,7 +574,7 @@ val fullIfExpressionParser: UniqueParser<ExpertFullIfExpression> = fun (str: Str
         nextIndexFrom = skipSpacesParser(str, ifExp.indexTo, scopeStack).indexTo
 
         val elifs = spacedStar(elifExpressionParser)(str, nextIndexFrom, scopeStack)
-        nextIndexFrom = if (elifs.isEmpty()) nextIndexFrom else demandSpacesParser(str, elifs.last().indexTo, scopeStack).indexTo
+        nextIndexFrom = if (elifs.isEmpty()) nextIndexFrom else skipSpacesParser(str, elifs.last().indexTo, scopeStack).indexTo
 
         val elseExp = optional(elseExpressionParser)(str, nextIndexFrom, scopeStack)
         if(elseExp.found != null) {
@@ -685,9 +686,9 @@ val processScopeExpressionParser: UniqueParser<ScopeExp> = {str, indexFrom, scop
 
 val loopScopeExpressionParser = strictDiff(processScopeExpressionParser, endLoopWordParser)
 val ifScopeExpressionParser = strictDiff(processScopeExpressionParser,
-    disjUnion(endIfWordParser, elseWordParser, thenWordParser))
+    disjUnion(endIfWordParser, elseWordParser, elifWordParser, thenWordParser))
 val ifAndLoopScopeExpressionParser = strictDiff(processScopeExpressionParser,
-    disjUnion(endIfWordParser, elseWordParser, thenWordParser,endLoopWordParser))
+    disjUnion(endIfWordParser, elseWordParser, elifWordParser, thenWordParser,endLoopWordParser))
 
 fun getScopeExpParser(scopeStack: ScopeStack): UniqueParser<ScopeExp> {
     if(scopeStack.inIf() && scopeStack.inLoop()) {
@@ -733,7 +734,7 @@ fun <T> specialCharTerminated(p: UniqueParser<T>): UniqueParser<T> {
     return {str, indexFrom, stack ->
         val res = p(str, indexFrom, stack)
         if(res.indexTo != str.length) {
-            disjUnion(demandSpacesParser, unitify(word(")")), unitify(word("\"")))(str, res.indexTo, stack)
+            disjUnion(demandSpacesParser, unitify(word(")")), unitify(word("\"")), unitify(word("@")))(str, res.indexTo, stack)
         }
 
         res
